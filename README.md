@@ -1,5 +1,5 @@
 # check_puppetserver
-Small Nagios to test Puppet 4 servers
+Small Nagios check script to test Puppet 4 servers
 
 ```
 $ ./check_puppetserver --help

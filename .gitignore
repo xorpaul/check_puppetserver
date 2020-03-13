@@ -1,3 +1,4 @@
+*.zip
 check_puppetserver
 *.swp
 *.pem

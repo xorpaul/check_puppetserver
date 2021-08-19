@@ -1,0 +1,6 @@
+# github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
+## explicit
+github.com/kballard/go-shellquote
+# github.com/xorpaul/go-nagios v0.0.0-20150828095130-23a06a37a851
+## explicit
+github.com/xorpaul/go-nagios

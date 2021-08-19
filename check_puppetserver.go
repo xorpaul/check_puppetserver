@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/tls"
-	"encoding/json"
 	"flag"
 	"io/ioutil"
 	"log"
@@ -21,11 +20,6 @@ var debug bool
 type QueryResponse struct {
 	ServerResponse []byte
 	Time           float64
-}
-
-type PuppetServerResponse struct {
-	Is_alive bool   `json:"is_alive"`
-	Version  string `json:"version"`
 }
 
 // Debugf is a helper function for debug logging if mainCfgSection["debug"] is set
@@ -58,6 +52,10 @@ func sendQuery(url string, client *http.Client) QueryResponse {
 		nagios.NagiosExit(nr)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		nr := nagios.NagiosResult{ExitCode: 2, Text: "Received non 200 HTTP response code from " + url, Perfdata: "time=" + strconv.FormatFloat(duration, 'f', 5, 64) + "s"}
+		nagios.NagiosExit(nr)
+	}
 	out, err = ioutil.ReadAll(resp.Body)
 
 	if err != nil {
@@ -80,23 +78,23 @@ func main() {
 	fqdn := strings.TrimSpace(string(hostnameOut))
 
 	var (
-		hostFlag        = flag.String("H", "localhost", "Hostname to query, defaults to localhost")
-		portFlag        = flag.Int("p", 8140, "Port to send the query to, defaults to 8140")
-		environmentFlag = flag.String("e", "production", "Puppet environment to ask for, defaults to production")
-		warningFlag     = flag.Float64("w", 5, "WARNING threshold in seconds, defaults to 5 seconds")
-		criticalFlag    = flag.Float64("c", 15, "CRITICAL threshold in seconds, defaults to 15 seconds")
-		debugFlag       = flag.Bool("debug", false, "log debug output, defaults to false")
+		hostFlag     = flag.String("H", "localhost", "Hostname to query")
+		uriFlag      = flag.String("u", "/status/v1/services", "URI to query, see https://puppet.com/docs/puppet/7/server/status-api/v1/services.html")
+		portFlag     = flag.Int("p", 8140, "Port to send the query to")
+		warningFlag  = flag.Float64("w", 5, "WARNING threshold in seconds")
+		criticalFlag = flag.Float64("c", 15, "CRITICAL threshold in seconds")
+		debugFlag    = flag.Bool("debug", false, "log debug output")
 		// tls flags
-		certFile = flag.String("cert", "/etc/puppetlabs/puppet/ssl/certs/"+fqdn+".pem", "A PEM eoncoded client certificate file, defaults to /etc/puppetlabs/puppet/ssl/certs/"+fqdn+".pem")
-		keyFile  = flag.String("key", "/etc/puppetlabs/puppet/ssl/private_keys/"+fqdn+".pem", "A PEM encoded private key file for the client certificate, defaults to /etc/puppetlabs/puppet/ssl/private_keys/"+fqdn+".pem")
+		certFile = flag.String("cert", "/etc/puppetlabs/puppet/ssl/certs/"+fqdn+".pem", "A PEM eoncoded client certificate file")
+		keyFile  = flag.String("key", "/etc/puppetlabs/puppet/ssl/private_keys/"+fqdn+".pem", "A PEM encoded private key file for the client certificate")
 	)
 
 	flag.Parse()
 
 	if len(os.Getenv("VIMRUNTIME")) > 0 {
 		*hostFlag = "localhost"
-		*certFile = "/home/andpaul/dev/go/src/github.com/xorpaul/check_puppetserver/cert.pem"
-		*keyFile = "/home/andpaul/dev/go/src/github.com/xorpaul/check_puppetserver/key.pem"
+		*certFile = "ssl/cert.pem"
+		*keyFile = "ssl/key.pem"
 		*debugFlag = true
 		*criticalFlag = 0.02
 	}
@@ -150,33 +148,18 @@ func main() {
 	tlsConfig.Certificates[0] = mycert
 
 	tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
-	tlsConfig.BuildNameToCertificate()
 
 	transport := &http.Transport{TLSClientConfig: tlsConfig}
 	client = &http.Client{Transport: transport}
 
-	url := "https://" + *hostFlag + ":" + strconv.Itoa(*portFlag) + "/puppet/v3/status/whatever?environment=" + *environmentFlag
+	url := "https://" + *hostFlag + ":" + strconv.Itoa(*portFlag) + *uriFlag
 	out := sendQuery(url, client)
 	time := strconv.FormatFloat(out.Time, 'f', 5, 64)
-	nr := nagios.NagiosResult{ExitCode: 3, Text: "uncatched case", Perfdata: "time=" + time + "s"}
+	nr := nagios.NagiosResult{ExitCode: 3, Text: "unexpected result", Perfdata: "time=" + time + "s"}
 
 	if len(out.ServerResponse) > 0 {
-		var r PuppetServerResponse
-		err := json.Unmarshal(out.ServerResponse, &r)
-		if err != nil {
-			Debugf("Error while decoding JSON response")
-			nr.ExitCode = 1
-			nr.Text = "Failed parsing Puppet Server JSON response, checked for Puppet environment " + *environmentFlag + " output: " + string(out.ServerResponse)
-		} else {
-			if r.Is_alive {
-				nr.ExitCode = 0
-				nr.Text = "Puppet Server (Version: " + r.Version + ") looks good, checked for Puppet environment " + *environmentFlag + " in " + time + "s"
-			} else {
-				nr.ExitCode = 1
-				nr.Text = "Puppet Server (Version: " + r.Version + ") did not answer with is_alive true, checked for Puppet environment " + *environmentFlag
-			}
-		}
-
+		nr.ExitCode = 0
+		nr.Text = "Puppet Server looks good, received 200 from " + url + " in " + time + "s"
 	} else {
 		nr.ExitCode = 1
 		nr.Text = "Received empty response for request against " + url
@@ -190,5 +173,13 @@ func main() {
 		nr.Text = "Response time " + time + "s >= " + strconv.FormatFloat(*warningFlag, 'f', 2, 64) + "s - " + nr.Text
 	}
 
+	// getMetrics(*hostFlag, *portFlag, client)
+
 	nagios.NagiosExit(nr)
 }
+
+// func getMetrics(host string, port int, client *http.Client) {
+// 	url := "https://" + host + ":" + strconv.Itoa(port) + "/metrics/v2/list"
+// 	out := sendQuery(url, client)
+// 	fmt.Println(out)
+// }
